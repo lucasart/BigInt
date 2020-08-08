@@ -3,10 +3,15 @@
 #include <stdlib.h>
 #include "bigint.h"
 
+#define max(x, y) ({ \
+    typeof(x) _x = (x), _y = (y); \
+    _x > _y ? _x : _y; \
+})
+
 // Verifes that the invariants are satisfied
-static bool bint_ok(const BigInt *x)
+static bool big_ok(const BigInt *x)
 {
-    if (x->count < 1 || x->reserved < x->count || !x->digits)
+    if (!x || x->count < 1 || x->reserved < x->count || !x->digits)
         return false;
 
     // Make sure that digits[count..reserved-1] only contains zeros
@@ -19,9 +24,9 @@ static bool bint_ok(const BigInt *x)
 
 // Resize to count elements, growing the buffer as needed (in powers of 2), and setting the leading
 // digits to zero.
-static void bint_resize(BigInt *x, int count)
+static void big_resize(BigInt *x, int count)
 {
-    assert(bint_ok(x));
+    assert(big_ok(x));
 
     const int oldReserved = x->reserved, oldCount = x->count;
     x->count = count;
@@ -30,56 +35,128 @@ static void bint_resize(BigInt *x, int count)
         x->reserved *= 2;
 
     if (x->reserved > oldReserved) {
-        x->digits = realloc(x->digits, sizeof(digit_t) * (size_t)x->reserved);
+        x->digits = realloc(x->digits, sizeof(long) * (size_t)x->reserved);
         for (int i = oldReserved; i < x->reserved; x->digits[i++] = 0);
     } else if (x->count < oldCount)
         for (int i = x->count; i < oldCount; x->digits[i++] = 0);
 
-    assert(bint_ok(x));
+    assert(big_ok(x));
 }
 
-BigInt bint_new(digit_t value)
+BigInt big_init()
 {
     BigInt x = {
-        .digits = malloc(sizeof(digit_t)),
+        .digits = calloc(1, sizeof(long)),
         .count = 1,
         .reserved = 1
     };
-    x.digits[0] = value;
 
-    assert(bint_ok(&x));
+    assert(big_ok(&x));
     return x;
 }
 
-void bint_del(BigInt *x)
+void big_clear(BigInt *x)
 {
-    assert(bint_ok(x));
+    assert(big_ok(x));
     free(x->digits);
     *x = (BigInt){0};
 }
 
-// Compares a BigInt to a digit
-bool bint_eq(const BigInt *x, digit_t y)
+void big_set(BigInt *x, const BigInt *y)
 {
-    assert(bint_ok(x));
-    return x->count == 1 && x->digits[0] == y;
-}
-
-void bint_copy(BigInt *x, const BigInt *y)
-{
-    assert(bint_ok(x) && bint_ok(y));
-    bint_resize(x, y->count);
+    assert(big_ok(x) && big_ok(y));
+    big_resize(x, y->count);
 
     for (int i = 0; i < y->count; i++)
         x->digits[i] = y->digits[i];
 
-    assert(bint_ok(x));
+    assert(big_ok(x));
 }
 
-// Print a BigInt's raw internals (for debugging)
-void bint_print_debug(const BigInt *x)
+void big_set_ui(BigInt *x, unsigned long y)
 {
-    assert(bint_ok(x));
+    assert(big_ok(x));
+    x->digits[0] = y;
+    x->count = 1;
+    assert(big_ok(x));
+}
+
+void big_set_str(BigInt *x, const char *str, int base)
+{
+    assert(big_ok(x) && str && 2 <= base && base <= 36);
+
+    big_set_ui(x, 0);
+
+    for (char c = *str; c; c = *(++str)) {
+        const char digit = '0' <= c && c <= '9' ? c - '0'
+            : 'a' <= c && c <= 'z' ? c - 'a'
+            : '\0';
+        big_add_ui(x, (unsigned long)digit);
+        big_mul(x, base);
+    }
+
+    assert(big_ok(x));
+}
+
+BigInt big_init_set(const BigInt *y)
+{
+    BigInt x = big_init();
+    big_set(&x, y);
+    return x;
+}
+
+BigInt big_init_set_ui(unsigned long y)
+{
+    BigInt x = big_init();
+    big_set_ui(&x, y);
+    return x;
+}
+
+BigInt big_init_set_str(const char *str, int base)
+{
+    BigInt x = big_init();
+    big_set_str(x, str, base);
+    return x;
+}
+
+unsigned long big_get_ui(const BigInt *x)
+{
+    assert(big_ok(x) && x->count == 1);
+    return x->digits[0];
+}
+
+char *big_get_str(const BigInt *x, int base)
+{
+    static const char symbols[] = "0123456789abcdefghijklmnopqrstuvwxyz";
+    assert(big_ok(x) && 2 <= base && base < sizeof(symbols));
+
+    size_t allocated = 16, idx = 0;
+    char *str = malloc(allocated);
+    BigInt tail = big_init_set(x);
+
+    while (!big_eq(&tail, 0)) {
+        str[idx++] = symbols[big_div(&tail, base)];
+
+        if (idx >= allocated) {
+            allocated *= 2;
+            str = realloc(str, allocated);
+        }
+    }
+
+    str[idx] = '\0';
+    return str;
+}
+
+// Compares a BigInt to a digit
+bool big_eq(const BigInt *x, unsigned long y)
+{
+    assert(big_ok(x));
+    return x->count == 1 && x->digits[0] == y;
+}
+
+void big_debug(const BigInt *x)
+{
+    assert(big_ok(x));
     putchar('{');
 
     printf("count: %d, reserved: %d, digits: (", x->count, x->reserved);
@@ -93,88 +170,128 @@ void bint_print_debug(const BigInt *x)
 }
 
 // Print a BigInt in given base, with shown in reverse, and returns the number of digits.
-unsigned bint_print(const BigInt *x, digit_t base)
+unsigned big_print(const BigInt *x, unsigned long base)
 {
-    static char symbols[] = "0123456789abcdefghijklmnopqrstuvwxyz";
-    assert(bint_ok(x) && base < sizeof(symbols));
+    assert(big_ok(x) && base < sizeof(symbols));
 
-    BigInt y = bint_new(0);
-    bint_copy(&y, x);
+    BigInt y = big_new(0);
+    big_copy(&y, x);
 
     unsigned count = 0;
 
-    while (!bint_eq(&y, 0)) {
-        const digit_t r = bint_div(&y, base);
+    while (!big_eq(&y, 0)) {
+        const unsigned long r = big_div(&y, base);
         assert(r < base);
         putchar(symbols[r]);
         count++;
     }
 
-    bint_del(&y);
+    big_del(&y);
 
     return max(1u, count);  // 0 still counts as 1 digit
 }
 
-// in-place addition: X += Y
-void bint_add(BigInt *x, const BigInt *y)
+void big_add(BigInt *r, const BigInt *x, const BigInt *y)
 {
-    assert(bint_ok(x) && bint_ok(y));
-    bint_resize(x, max(x->count, y->count));
+    assert(big_ok(r) && big_ok(x) && big_ok(y));
+    big_resize(r, max(x->count, y->count));
 
-    digit_t carry = 0;
+    unsigned long carry = 0;
 
-    for (int i = 0; i < x->count; i++) {
-        const container_t sum = (container_t)x->digits[i] + (container_t)y->digits[i]
+    for (int i = 0; i < r->count; i++) {
+        const container_t sum = (container_t)(i < x->count ? x->digits[i] : 0)
+            + (container_t)(i < y->count ? y->digits[i] : 0)
             + (container_t)carry;
-        x->digits[i] = (digit_t)sum;
-        carry = (digit_t)(sum >> (sizeof(digit_t) * 8));
+        r->digits[i] = (unsigned long)sum;
+        carry = (unsigned long)(sum >> (sizeof(long) * 8));
     }
 
     if (carry) {
-        bint_resize(x, x->count + 1);
-        x->digits[x->count - 1] = carry;
+        big_resize(r, r->count + 1);
+        r->digits[r->count - 1] = carry;
     }
 
-    assert(bint_ok(x));
+    assert(big_ok(r));
 }
 
-// in-place multiplication by digit: X *= y
-void bint_mul(BigInt *x, digit_t y)
+void big_add_ui(BigInt *r, const BigInt *x, unsigned long y)
 {
-    assert(bint_ok(x));
-    digit_t carry = 0;
+    assert(big_ok(r) && big_ok(x));
+
+    // TODO: This can done faster. For now, focus on correctness.
+    BigInt yBig = big_init_set_ui(y);
+    big_add(r, x, &yBig);
+    big_del(&yBig);
+    big_ok(r);
+}
+
+void big_sub(BigInt *r, const BigInt *x, const BigInt *y)
+{
+    assert(big_ok(r) && big_ok(x) && big_ok(y));
+    // TODO
+}
+
+void big_sub_ui(BigInt *r, const BigInt *x, unsigned long y)
+{
+    assert(big_ok(r) && big_ok(x));
+
+    // TODO: This can done faster. For now, focus on correctness.
+    BigInt yBig = big_init_set_ui(y);
+    big_sub(r, x, &yBig);
+    big_del(&yBig);
+    big_ok(r);
+}
+
+void big_mul(BigInt *r, const BigInt *x, const BigInt *y)
+{
+    assert(big_ok(r) && big_ok(x) && big_ok(y));
+    // TODO
+}
+
+void big_mul_ui(BigInt *r, const BigInt *x, unsigned long y)
+{
+    assert(big_ok(r) && big_ok(x));
+    big_resize(r, x->count);
+
+    unsigned long carry = 0;
 
     for (int i = 0; i < x->count; i++) {
         const container_t product = (container_t)x->digits[i] * (container_t)y
             + (container_t)carry;
-        x->digits[i] = (digit_t)product;
-        carry = (digit_t)(product >> (sizeof(digit_t) * 8));
+        r->digits[i] = (unsigned long)product;
+        carry = (unsigned long)(product >> (sizeof(long) * 8));
     }
 
     if (carry) {
-        bint_resize(x, x->count + 1);
-        x->digits[x->count - 1] = carry;
+        big_resize(r, r->count + 1);
+        r->digits[r->count - 1] = carry;
     }
 
-    assert(bint_ok(x));
+    assert(big_ok(r));
 }
 
-// in-place division by digit: X /= y, returns remainder
-digit_t bint_div(BigInt *x, digit_t y)
+void big_div(BigInt *q, BigInt *r, const BigInt *x, const BigInt *y)
 {
-    assert(bint_ok(x) && y);
-    digit_t carry = 0;
+    // TODO
+}
+
+unsigned long big_div_ui(BigInt *q, const BigInt *x, unsigned long y)
+{
+    assert(big_ok(q) && big_ok(x) && y);
+    big_resize(q, x);
+
+    unsigned long carry = 0;
 
     for (int i = x->count - 1; i >= 0; i--) {
         const container_t numerator = (container_t)x->digits[i]
-            + ((container_t)carry << (sizeof(digit_t) * 8));
-        x->digits[i] = (digit_t)(numerator / y);
-        carry = (digit_t)(numerator % y);
+            + ((container_t)carry << (sizeof(long) * 8));
+        q->digits[i] = (unsigned long)(numerator / y);
+        carry = (unsigned long)(numerator % y);
     }
 
-    if (!x->digits[x->count - 1])
-        bint_resize(x, max(1, x->count - 1));
+    if (!q->digits[x->count - 1])
+        big_resize(q, max(1, q->count - 1));
 
-    assert(bint_ok(x));
+    assert(big_ok(q));
     return carry;
 }

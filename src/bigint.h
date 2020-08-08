@@ -1,35 +1,52 @@
 #pragma once
 #include <stdbool.h>
-#include <inttypes.h>
-
-typedef uint64_t digit_t;
-typedef __uint128_t container_t;
-
-#define min(x, y) ({ \
-    typeof(x) _x = (x), _y = (y); \
-    _x < _y ? _x : _y; \
-})
-
-#define max(x, y) ({ \
-    typeof(x) _x = (x), _y = (y); \
-    _x > _y ? _x : _y; \
-})
+#include <stdint.h>
 
 typedef struct {
-    digit_t *digits;  // digits[k] is the 2^64 factor in the polynomial
-    int count;  // number of digits
-    int reserved;  // number of elements malloced (>= count due to realloc strategy)
+    unsigned long *digits;  // digits in base 2^N, from lowest to highest.
+    int count;  // number of digits (in base 2^N). Always >= 1.
+    int reserved;  // number of elements allocated for digits[]. Always >= count.
 } BigInt;
 
-BigInt bint_new(digit_t v);
-void bint_del(BigInt *x);
+// Initializing Integers
+BigInt big_init();
+void big_clear(BigInt *x);
 
-bool bint_eq(const BigInt *x, digit_t y);
-void bint_copy(BigInt *x, const BigInt *y);
+// Assignment
+void big_set(BigInt *x, const BigInt *y);
+void big_set_ui(BigInt *x, unsigned long y);
+void big_set_str(const char *str, int base);
 
-unsigned bint_print(const BigInt *x, digit_t base);
-void bint_print_debug(const BigInt *x);
+// Combined Initialization and Assignment
+BigInt big_init_set(const BigInt *y);
+BigInt big_init_set_ui(unsigned long y);
+BigInt big_init_set_str(const char *str, int base);
 
-void bint_add(BigInt *x, const BigInt *y);
-void bint_mul(BigInt *x, digit_t y);
-digit_t bint_div(BigInt *x, digit_t y);
+// Conversion
+unsigned long big_get_ui(const BigInt *x);
+char *big_get_str(const BigInt *x, int base);
+
+// Operations
+
+// addition: r = x + y
+void big_add(BigInt *r, const BigInt *x, const BigInt *y);
+void big_add_ui(BigInt *r, const BigInt *x, unsigned long y);
+
+// substraction: r = x - y
+void big_sub(BigInt *r, const BigInt *x, const BigInt *y);
+void big_sub_ui(BigInt *r, const BigInt *x, unsigned long y);
+
+// multiplication: r = x * y
+void big_mul(BigInt *r, const BigInt *x, const BigInt *y);
+void big_mul_ui(BigInt *r, const BigInt *x, unsigned long y);
+
+// division: q = x / y, r = x % y
+void big_div(BigInt *q, BigInt *r, const BigInt *x, const BigInt *y);
+unsigned long big_div_ui(BigInt *q, const BigInt *x, unsigned long y);  // returns r
+
+// Comparison
+int big_cmp(const BigInt *x, const BigInt *y);
+int big_cmp_ui(const BigInt *x, unsigned long y);
+
+// Expose internal representation. Useful for debugging.
+void big_debug(const BigInt *x);
