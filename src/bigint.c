@@ -1,5 +1,4 @@
 #include <assert.h>
-#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include "bigint.h"
@@ -13,14 +12,6 @@
     typeof(x) _x = x; \
     x = y; y = _x; \
 })
-
-#if UINTPTR_MAX == 0xffffffff
-    // 32-bit
-    typedef uint64_t container_t;
-#else
-    // assume 64-bit
-    typedef __uint128_t container_t;
-#endif
 
 // Verifes that the invariants are satisfied
 static bool big_ok(const BigInt *x)
@@ -49,7 +40,7 @@ static void big_resize(BigInt *x, int count)
         x->reserved *= 2;
 
     if (x->reserved > oldReserved) {
-        x->digits = realloc(x->digits, sizeof(long) * (size_t)x->reserved);
+        x->digits = realloc(x->digits, sizeof(digit_t) * (size_t)x->reserved);
         for (int i = oldReserved; i < x->reserved; x->digits[i++] = 0);
     } else if (x->count < oldCount)
         for (int i = x->count; i < oldCount; x->digits[i++] = 0);
@@ -60,7 +51,7 @@ static void big_resize(BigInt *x, int count)
 BigInt big_init()
 {
     BigInt x = {
-        .digits = calloc(1, sizeof(long)),
+        .digits = calloc(1, sizeof(digit_t)),
         .count = 1,
         .reserved = 1
     };
@@ -87,7 +78,7 @@ void big_set(BigInt *x, const BigInt *y)
     assert(big_ok(x));
 }
 
-void big_set_ui(BigInt *x, unsigned long y)
+void big_set_ui(BigInt *x, digit_t y)
 {
     assert(big_ok(x));
     x->digits[0] = y;
@@ -105,7 +96,7 @@ void big_set_str(BigInt *x, const char *str, unsigned base)
         const char digit = '0' <= c && c <= '9' ? c - '0'
             : 'a' <= c && c <= 'z' ? c - 'a'
             : '\0';
-        big_add_ui(x, x, (unsigned long)digit);
+        big_add_ui(x, x, (digit_t)digit);
         big_mul_ui(x, x, base);
     }
 
@@ -119,7 +110,7 @@ BigInt big_init_set(const BigInt *y)
     return x;
 }
 
-BigInt big_init_set_ui(unsigned long y)
+BigInt big_init_set_ui(digit_t y)
 {
     BigInt x = big_init();
     big_set_ui(&x, y);
@@ -133,7 +124,7 @@ BigInt big_init_set_str(const char *str, unsigned base)
     return x;
 }
 
-unsigned long big_get_ui(const BigInt *x)
+digit_t big_get_ui(const BigInt *x)
 {
     assert(big_ok(x) && x->count == 1);
     return x->digits[0];
@@ -172,7 +163,7 @@ int big_cmp(const BigInt *x, const BigInt *y)
     return 0;
 }
 
-int big_cmp_ui(const BigInt *x, unsigned long y)
+int big_cmp_ui(const BigInt *x, digit_t y)
 {
     assert(big_ok(x));
     return x->count > 1 ? 1
@@ -201,14 +192,14 @@ void big_add(BigInt *r, const BigInt *x, const BigInt *y)
     assert(big_ok(r) && big_ok(x) && big_ok(y));
     big_resize(r, max(x->count, y->count));
 
-    unsigned long carry = 0;
+    digit_t carry = 0;
 
     for (int i = 0; i < r->count; i++) {
         const container_t sum = (container_t)(i < x->count ? x->digits[i] : 0)
             + (container_t)(i < y->count ? y->digits[i] : 0)
             + (container_t)carry;
-        r->digits[i] = (unsigned long)sum;
-        carry = (unsigned long)(sum >> (sizeof(long) * 8));
+        r->digits[i] = (digit_t)sum;
+        carry = (digit_t)(sum >> (sizeof(digit_t) * 8));
     }
 
     if (carry) {
@@ -219,7 +210,7 @@ void big_add(BigInt *r, const BigInt *x, const BigInt *y)
     assert(big_ok(r));
 }
 
-void big_add_ui(BigInt *r, const BigInt *x, unsigned long y)
+void big_add_ui(BigInt *r, const BigInt *x, digit_t y)
 {
     assert(big_ok(r) && big_ok(x));
 
@@ -236,7 +227,7 @@ void big_sub(BigInt *r, const BigInt *x, const BigInt *y)
     // TODO
 }
 
-void big_sub_ui(BigInt *r, const BigInt *x, unsigned long y)
+void big_sub_ui(BigInt *r, const BigInt *x, digit_t y)
 {
     assert(big_ok(r) && big_ok(x));
 
@@ -253,18 +244,18 @@ void big_mul(BigInt *r, const BigInt *x, const BigInt *y)
     // TODO
 }
 
-void big_mul_ui(BigInt *r, const BigInt *x, unsigned long y)
+void big_mul_ui(BigInt *r, const BigInt *x, digit_t y)
 {
     assert(big_ok(r) && big_ok(x));
     big_resize(r, x->count);
 
-    unsigned long carry = 0;
+    digit_t carry = 0;
 
     for (int i = 0; i < x->count; i++) {
         const container_t product = (container_t)x->digits[i] * (container_t)y
             + (container_t)carry;
-        r->digits[i] = (unsigned long)product;
-        carry = (unsigned long)(product >> (sizeof(long) * 8));
+        r->digits[i] = (digit_t)product;
+        carry = (digit_t)(product >> (sizeof(digit_t) * 8));
     }
 
     if (carry) {
@@ -281,18 +272,18 @@ void big_div(BigInt *q, BigInt *r, const BigInt *x, const BigInt *y)
     // TODO
 }
 
-unsigned long big_div_ui(BigInt *q, const BigInt *x, unsigned long y)
+digit_t big_div_ui(BigInt *q, const BigInt *x, digit_t y)
 {
     assert(big_ok(q) && big_ok(x) && y);
     big_resize(q, x->count);
 
-    unsigned long carry = 0;
+    digit_t carry = 0;
 
     for (int i = x->count - 1; i >= 0; i--) {
         const container_t numerator = (container_t)x->digits[i]
-            + ((container_t)carry << (sizeof(long) * 8));
-        q->digits[i] = (unsigned long)(numerator / y);
-        carry = (unsigned long)(numerator % y);
+            + ((container_t)carry << (sizeof(digit_t) * 8));
+        q->digits[i] = (digit_t)(numerator / y);
+        carry = (digit_t)(numerator % y);
     }
 
     if (!q->digits[x->count - 1])
