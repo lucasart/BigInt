@@ -9,22 +9,22 @@ typedef struct {
 } BigInt;
 
 // Initializing Integers
-BigInt big_init();
+BigInt big_init(void);
 void big_clear(BigInt *x);
 
 // Assignment
 void big_set(BigInt *x, const BigInt *y);
 void big_set_ui(BigInt *x, unsigned long y);
-void big_set_str(const char *str, int base);
+void big_set_str(BigInt *x, const char *str, unsigned base);
 
 // Combined Initialization and Assignment
 BigInt big_init_set(const BigInt *y);
 BigInt big_init_set_ui(unsigned long y);
-BigInt big_init_set_str(const char *str, int base);
+BigInt big_init_set_str(const char *str, unsigned base);
 
 // Conversion
 unsigned long big_get_ui(const BigInt *x);
-char *big_get_str(const BigInt *x, int base);
+char *big_get_str(const BigInt *x, unsigned base);
 
 // Operations
 

@@ -1,4 +1,5 @@
 #include <assert.h>
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include "bigint.h"
@@ -7,6 +8,19 @@
     typeof(x) _x = (x), _y = (y); \
     _x > _y ? _x : _y; \
 })
+
+#define swap(x, y) ({ \
+    typeof(x) _x = x; \
+    x = y; y = _x; \
+})
+
+#if UINTPTR_MAX == 0xffffffff
+    // 32-bit
+    typedef uint64_t container_t;
+#else
+    // assume 64-bit
+    typedef __uint128_t container_t;
+#endif
 
 // Verifes that the invariants are satisfied
 static bool big_ok(const BigInt *x)
@@ -81,7 +95,7 @@ void big_set_ui(BigInt *x, unsigned long y)
     assert(big_ok(x));
 }
 
-void big_set_str(BigInt *x, const char *str, int base)
+void big_set_str(BigInt *x, const char *str, unsigned base)
 {
     assert(big_ok(x) && str && 2 <= base && base <= 36);
 
@@ -91,8 +105,8 @@ void big_set_str(BigInt *x, const char *str, int base)
         const char digit = '0' <= c && c <= '9' ? c - '0'
             : 'a' <= c && c <= 'z' ? c - 'a'
             : '\0';
-        big_add_ui(x, (unsigned long)digit);
-        big_mul(x, base);
+        big_add_ui(x, x, (unsigned long)digit);
+        big_mul_ui(x, x, base);
     }
 
     assert(big_ok(x));
@@ -112,10 +126,10 @@ BigInt big_init_set_ui(unsigned long y)
     return x;
 }
 
-BigInt big_init_set_str(const char *str, int base)
+BigInt big_init_set_str(const char *str, unsigned base)
 {
     BigInt x = big_init();
-    big_set_str(x, str, base);
+    big_set_str(&x, str, base);
     return x;
 }
 
@@ -125,7 +139,7 @@ unsigned long big_get_ui(const BigInt *x)
     return x->digits[0];
 }
 
-char *big_get_str(const BigInt *x, int base)
+char *big_get_str(const BigInt *x, unsigned base)
 {
     static const char symbols[] = "0123456789abcdefghijklmnopqrstuvwxyz";
     assert(big_ok(x) && 2 <= base && base < sizeof(symbols));
@@ -134,8 +148,8 @@ char *big_get_str(const BigInt *x, int base)
     char *str = malloc(allocated);
     BigInt tail = big_init_set(x);
 
-    while (!big_eq(&tail, 0)) {
-        str[idx++] = symbols[big_div(&tail, base)];
+    while (big_cmp_ui(&tail, 0)) {
+        str[idx++] = symbols[big_div_ui(&tail, &tail, base)];
 
         if (idx >= allocated) {
             allocated *= 2;
@@ -143,15 +157,28 @@ char *big_get_str(const BigInt *x, int base)
         }
     }
 
+    // Reverse str[0..idx-1]
+    for (size_t i = 0; i <= (idx - 1) / 2; i++)
+        swap(str[i], str[idx - 1 - i]);
+
     str[idx] = '\0';
     return str;
 }
 
-// Compares a BigInt to a digit
-bool big_eq(const BigInt *x, unsigned long y)
+int big_cmp(const BigInt *x, const BigInt *y)
+{
+    assert(big_ok(x) && big_ok(y));
+    // TODO
+    return 0;
+}
+
+int big_cmp_ui(const BigInt *x, unsigned long y)
 {
     assert(big_ok(x));
-    return x->count == 1 && x->digits[0] == y;
+    return x->count > 1 ? 1
+        : x->digits[0] > y ? 1
+        : x->digits[0] < y ? -1
+        : 0;
 }
 
 void big_debug(const BigInt *x)
@@ -166,29 +193,7 @@ void big_debug(const BigInt *x)
         putchar(i == x->count - 1 ? ')' : ',');
     }
 
-    putchar('}');
-}
-
-// Print a BigInt in given base, with shown in reverse, and returns the number of digits.
-unsigned big_print(const BigInt *x, unsigned long base)
-{
-    assert(big_ok(x) && base < sizeof(symbols));
-
-    BigInt y = big_new(0);
-    big_copy(&y, x);
-
-    unsigned count = 0;
-
-    while (!big_eq(&y, 0)) {
-        const unsigned long r = big_div(&y, base);
-        assert(r < base);
-        putchar(symbols[r]);
-        count++;
-    }
-
-    big_del(&y);
-
-    return max(1u, count);  // 0 still counts as 1 digit
+    puts("}");
 }
 
 void big_add(BigInt *r, const BigInt *x, const BigInt *y)
@@ -221,7 +226,7 @@ void big_add_ui(BigInt *r, const BigInt *x, unsigned long y)
     // TODO: This can done faster. For now, focus on correctness.
     BigInt yBig = big_init_set_ui(y);
     big_add(r, x, &yBig);
-    big_del(&yBig);
+    big_clear(&yBig);
     big_ok(r);
 }
 
@@ -238,7 +243,7 @@ void big_sub_ui(BigInt *r, const BigInt *x, unsigned long y)
     // TODO: This can done faster. For now, focus on correctness.
     BigInt yBig = big_init_set_ui(y);
     big_sub(r, x, &yBig);
-    big_del(&yBig);
+    big_clear(&yBig);
     big_ok(r);
 }
 
@@ -272,13 +277,14 @@ void big_mul_ui(BigInt *r, const BigInt *x, unsigned long y)
 
 void big_div(BigInt *q, BigInt *r, const BigInt *x, const BigInt *y)
 {
+    assert(big_ok(q) && big_ok(r) && big_ok(x) && big_ok(y));
     // TODO
 }
 
 unsigned long big_div_ui(BigInt *q, const BigInt *x, unsigned long y)
 {
     assert(big_ok(q) && big_ok(x) && y);
-    big_resize(q, x);
+    big_resize(q, x->count);
 
     unsigned long carry = 0;
 
